@@ -410,21 +410,23 @@ impl MarketplaceContract {
                     panic_with_error!(&env, MarketplaceError::TokenNotWhitelisted);
                 }
 
-                Self::distribute_payout(
-                    &env,
-                    &listing.token,
-                    listing.price,
-                    &listing.original_creator,
-                    listing.royalty_bps,
-                    &listing.artist,
-                    &listing.recipients,
-                    &buyer,
-                    true,
-                );
-
+        // Update listing status before payout to prevent reuse even if payout fails
         listing.status = ListingStatus::Sold;
         listing.owner = Some(buyer.clone());
         save_listing(&env, &listing);
+
+        // Distribute payout after status update - if this fails, lock will still be released
+        Self::distribute_payout(
+            &env,
+            &listing.token,
+            listing.price,
+            &listing.original_creator,
+            listing.royalty_bps,
+            &listing.artist,
+            &listing.recipients,
+            &buyer,
+            true,
+        );
 
         ArtworkSoldEvent {
             listing_id,
@@ -623,6 +625,11 @@ impl MarketplaceContract {
 
         let (finalized_winner, finalized_amount) =
             if let Some(ref winner) = auction.highest_bidder.clone() {
+                // Update auction status before payout to prevent reuse even if payout fails
+                auction.status = AuctionStatus::Finalized;
+                save_auction(&env, &auction);
+
+                // Distribute payout after status update - if this fails, lock will still be released
                 Self::distribute_payout(
                     &env,
                     &auction.token,
@@ -634,14 +641,13 @@ impl MarketplaceContract {
                     winner,
                     false,
                 );
-                auction.status = AuctionStatus::Finalized;
                 (Some(winner.clone()), auction.highest_bid)
             } else {
                 auction.status = AuctionStatus::Cancelled;
+                save_auction(&env, &auction);
                 (None, 0)
             };
 
-        save_auction(&env, &auction);
         release_auction_lock(&env, auction_id);
 
         AuctionFinalizedEvent {
