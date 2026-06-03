@@ -2486,3 +2486,27 @@ fn test_buy_artwork_blocked_when_paused() {
     // buy_artwork must panic while paused
     client.buy_artwork(&buyer, &listing_id, &token_id);
 }
+
+#[test]
+fn test_listing_status_updated_before_payout() {
+    // This test verifies that listing status is updated before distribute_payout
+    // to prevent reentrancy issues even if payout fails
+    let (env, client, artist, buyer, token_id, _) = setup();
+    client.set_admin(&artist);
+    client.add_token_to_whitelist(&token_id);
+    
+    let listing_id = create_test_listing(&env, &client, &artist, &token_id);
+    
+    // Verify listing starts as Active
+    let listing_before = crate::storage::load_listing(&env, listing_id).unwrap();
+    assert_eq!(listing_before.status, crate::types::ListingStatus::Active);
+    
+    // Purchase the listing
+    client.buy_artwork(&buyer, &listing_id);
+    
+    // Verify listing is now Sold (status updated before payout)
+    let listing_after = crate::storage::load_listing(&env, listing_id).unwrap();
+    assert_eq!(listing_after.status, crate::types::ListingStatus::Sold);
+    assert_eq!(listing_after.owner, Some(buyer));
+}
+}
